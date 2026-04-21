@@ -50,7 +50,7 @@
 #include "DSi_I2C.h"
 #include "GPU_Soft.h"
 #include "GPU_OpenGL.h"
-
+#include "ScreenStreamer.h"
 #include "Savestate.h"
 
 #include "EmuInstance.h"
@@ -107,6 +107,9 @@ void EmuThread::run()
 {
     Config::Table& globalCfg = emuInstance->getGlobalConfig();
     u32 mainScreenPos[3];
+
+
+    ScreenStreamer streamer("192.168.68.107", 5000);
 
     //emuInstance->updateConsole();
     // No carts are inserted when melonDS first boots
@@ -309,6 +312,18 @@ void EmuThread::run()
             else
             {
                 nlines = emuInstance->nds->RunFrame();
+            }
+
+            {
+                void* top    = nullptr;
+                void* bottom = nullptr;
+                // GetFramebuffers ritorna false se il renderer è OpenGL
+                // (i framebuffer stanno sulla GPU, non in RAM)
+                if (emuInstance->nds->GPU.GetRenderer().GetFramebuffers(&top, &bottom))
+                {
+                    if (bottom)
+                        streamer.sendFrame(bottom, 256, 192);
+                }
             }
 
             if (emuInstance->ndsSave)
