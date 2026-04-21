@@ -15,6 +15,7 @@ set(SOURCES_QT_SDL
     CheatsDialog.cpp
     Config.cpp
     DateTimeDialog.cpp
+    ScreenStreamer.cpp
     EmuSettingsDialog.cpp
     PowerManagement/PowerManagementDialog.cpp
     PowerManagement/resources/battery.qrc
