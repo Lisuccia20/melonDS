@@ -21,7 +21,7 @@ public:
 
 private:
     int sock;
-    void listenforbroadcast();
+    void listenForBroadcast();
 
     struct sockaddr_in addr;
 
