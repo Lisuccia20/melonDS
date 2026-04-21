@@ -16,8 +16,10 @@ struct PacketHeader {
 static constexpr int HEADER_SIZE  = sizeof(PacketHeader);
 static constexpr int CHUNK_SIZE   = 60000;
 static constexpr int MAX_PACKET   = HEADER_SIZE + CHUNK_SIZE;
+sockaddr_in clientAddr;
+socklen_t clientLen;
 
-ScreenStreamer::ScreenStreamer(const std::string& ip, uint16_t port) {
+ScreenStreamer::ScreenStreamer(uint16_t port) {
 #ifdef _WIN32
     WSADATA wsa;
     WSAStartup(MAKEWORD(2,2), &wsa);
@@ -35,11 +37,6 @@ ScreenStreamer::ScreenStreamer(const std::string& ip, uint16_t port) {
     std::memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port   = htons(port);
-
-#ifdef _WIN32
-    InetPtonA(AF_INET, ip.c_str(), &addr.sin_addr);
-#else
-    inet_pton(AF_INET, ip.c_str(), &addr.sin_addr);
 #endif
     std::thread(&ScreenStreamer::listenForBroadcast, this).detach();
 }
@@ -76,8 +73,8 @@ void ScreenStreamer::sendFrame(const void* bgraData, int width, int height) {
                reinterpret_cast<const char*>(packet),
                HEADER_SIZE + size,
                0,
-               reinterpret_cast<sockaddr*>(&addr),
-               sizeof(addr));
+               reinterpret_cast<sockaddr*>(&clientAddr),
+               sizeof(&clientAddr));
     }
 
     frameId++;
@@ -112,6 +109,8 @@ void ScreenStreamer::listenForBroadcast() {
             std::string msg(buffer);
 
             if (msg == "DISCOVER_SERVER") {
+                clientAddr = client;
+                clientLen = len
                 const char* reply = "SERVER_HERE";
 
                 sendto(sendSock, reply, strlen(reply), 0,

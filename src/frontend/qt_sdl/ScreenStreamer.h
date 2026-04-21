@@ -14,7 +14,7 @@
 
 class ScreenStreamer {
 public:
-    ScreenStreamer(const std::string& ip, uint16_t port);
+    ScreenStreamer(uint16_t port);
     ~ScreenStreamer();
 
     void sendFrame(const void* bgraData, int width, int height);
