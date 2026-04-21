@@ -3,7 +3,9 @@
 #include <cstring>
 #include <algorithm>
 #include <thread>
+#include <atomic>
 #include <unistd.h>
+#include <string>
 
 #pragma pack(push, 1)
 struct PacketHeader {
@@ -13,17 +15,19 @@ struct PacketHeader {
 };
 #pragma pack(pop)
 
-static constexpr int HEADER_SIZE  = sizeof(PacketHeader);
-static constexpr int CHUNK_SIZE   = 60000;
-static constexpr int MAX_PACKET   = HEADER_SIZE + CHUNK_SIZE;
-sockaddr_in clientAddr;
-socklen_t clientLen;
+static constexpr int HEADER_SIZE = sizeof(PacketHeader);
+static constexpr int CHUNK_SIZE  = 60000;
+static constexpr int MAX_PACKET  = HEADER_SIZE + CHUNK_SIZE;
+
+// stato client globale della sessione
+static sockaddr_in clientAddr{};
+static socklen_t clientLen = sizeof(clientAddr);
+static std::atomic<bool> clientReady = false;
 
 ScreenStreamer::ScreenStreamer(uint16_t port) {
 #ifdef _WIN32
     WSADATA wsa;
     WSAStartup(MAKEWORD(2,2), &wsa);
-
     sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 #else
     sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -31,12 +35,9 @@ ScreenStreamer::ScreenStreamer(uint16_t port) {
 
     int bufSize = 4 * 1024 * 1024;
     setsockopt(sock, SOL_SOCKET, SO_SNDBUF,
-                reinterpret_cast<const char*>(&bufSize),
-                sizeof(bufSize));
+               reinterpret_cast<const char*>(&bufSize),
+               sizeof(bufSize));
 
-    std::memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port   = htons(port);
     std::thread(&ScreenStreamer::listenForBroadcast, this).detach();
 }
 
@@ -50,20 +51,22 @@ ScreenStreamer::~ScreenStreamer() {
 }
 
 void ScreenStreamer::sendFrame(const void* bgraData, int width, int height) {
+    if (!clientReady) return; // nessun client ancora
+
     const uint8_t* data = static_cast<const uint8_t*>(bgraData);
 
-    int totalBytes  = width * height * 4;
-    int totalChunks  = (totalBytes + CHUNK_SIZE - 1) / CHUNK_SIZE;
+    int totalBytes = width * height * 4;
+    int totalChunks = (totalBytes + CHUNK_SIZE - 1) / CHUNK_SIZE;
 
     uint8_t packet[MAX_PACKET];
     auto* hdr = reinterpret_cast<PacketHeader*>(packet);
 
     for (int i = 0; i < totalChunks; i++) {
         int offset = i * CHUNK_SIZE;
-        int size   = std::min(CHUNK_SIZE, totalBytes - offset);
+        int size = std::min(CHUNK_SIZE, totalBytes - offset);
 
-        hdr->frameId     = frameId;
-        hdr->chunkIndex  = static_cast<uint16_t>(i);
+        hdr->frameId = frameId;
+        hdr->chunkIndex = static_cast<uint16_t>(i);
         hdr->totalChunks = static_cast<uint16_t>(totalChunks);
 
         std::memcpy(packet + HEADER_SIZE, data + offset, size);
@@ -73,7 +76,7 @@ void ScreenStreamer::sendFrame(const void* bgraData, int width, int height) {
                HEADER_SIZE + size,
                0,
                reinterpret_cast<sockaddr*>(&clientAddr),
-               sizeof(&clientAddr));
+               sizeof(clientAddr));   // ✅ FIX QUI
     }
 
     frameId++;
@@ -108,12 +111,16 @@ void ScreenStreamer::listenForBroadcast() {
             std::string msg(buffer);
 
             if (msg == "DISCOVER_SERVER") {
+
+                // salva client per streaming
                 clientAddr = client;
                 clientLen = len;
+                clientReady = true;
+
                 const char* reply = "SERVER_HERE";
 
                 sendto(sendSock, reply, strlen(reply), 0,
-                       (sockaddr*)&client, len);
+                       (sockaddr*)&clientAddr, clientLen);
             }
         }
 
