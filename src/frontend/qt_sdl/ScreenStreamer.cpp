@@ -114,6 +114,7 @@ void ScreenStreamer::listenForBroadcast() {
 
                 // salva client per streaming
                 clientAddr = client;
+                clientAddr.sin_port = htons(5001)
                 clientLen = len;
                 clientReady = true;
 
