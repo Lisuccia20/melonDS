@@ -109,7 +109,7 @@ void EmuThread::run()
     u32 mainScreenPos[3];
 
 
-    ScreenStreamer streamer(5000);
+    ScreenStreamer streamer(5001);
 
     //emuInstance->updateConsole();
     // No carts are inserted when melonDS first boots
