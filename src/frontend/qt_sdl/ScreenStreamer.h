@@ -2,6 +2,7 @@
 
 #include <string>
 #include <cstdint>
+#include <atomic>
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -20,12 +21,13 @@ public:
     void sendFrame(const void* bgraData, int width, int height);
 
 private:
-    int sock;
-    void listenForBroadcast();
+    void listenLoop();   // ✔ nome unico e coerente
 
-    struct sockaddr_in addr;
-
+    int sock = -1;
     uint32_t frameId = 0;
+
+    sockaddr_in clientAddr{};
+    std::atomic<bool> clientReady{false};
 
     static constexpr int CHUNK_PAYLOAD = 60000;
 };
