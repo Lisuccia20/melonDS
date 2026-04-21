@@ -110,7 +110,7 @@ void ScreenStreamer::listenForBroadcast() {
 
             if (msg == "DISCOVER_SERVER") {
                 clientAddr = client;
-                clientLen = len
+                clientLen = len;
                 const char* reply = "SERVER_HERE";
 
                 sendto(sendSock, reply, strlen(reply), 0,
