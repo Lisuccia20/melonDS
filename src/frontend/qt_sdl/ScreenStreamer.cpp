@@ -39,6 +39,7 @@ ScreenStreamer::ScreenStreamer(const std::string& ip, uint16_t port) {
 #else
     inet_pton(AF_INET, ip.c_str(), &addr.sin_addr);
 #endif
+        std::thread(&ScreenStreamer::listenForBroadcast, this).detach();
 }
 
 ScreenStreamer::~ScreenStreamer() {
@@ -78,4 +79,35 @@ void ScreenStreamer::sendFrame(const void* bgraData, int width, int height) {
     }
 
     frameId++;
+}
+
+void ScreenStreamer::listenForBroadcast() {
+    int recvSock = socket(AF_INET, SOCK_DGRAM, 0);
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(5000); // porta discovery
+    addr.sin_addr.s_addr = INADDR_ANY;
+
+    bind(recvSock, (sockaddr*)&addr, sizeof(addr));
+
+    char buffer[256];
+    sockaddr_in client{};
+    socklen_t len = sizeof(client);
+
+    while (true) {
+        int r = recvfrom(recvSock, buffer, sizeof(buffer)-1, 0,
+                         (sockaddr*)&client, &len);
+
+        if (r > 0) {
+            buffer[r] = '\0';
+
+            if (std::string(buffer) == "DISCOVER_SERVER") {
+                const char* reply = "SERVER_HERE";
+
+                sendto(recvSock, reply, strlen(reply), 0,
+                       (sockaddr*)&client, len);
+            }
+        }
+    }
 }
