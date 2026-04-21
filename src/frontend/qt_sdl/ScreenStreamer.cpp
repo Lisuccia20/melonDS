@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <algorithm>
+#include <thread>
 
 #pragma pack(push, 1)
 struct PacketHeader {
