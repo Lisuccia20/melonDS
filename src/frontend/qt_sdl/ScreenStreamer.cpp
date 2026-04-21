@@ -37,7 +37,6 @@ ScreenStreamer::ScreenStreamer(uint16_t port) {
     std::memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port   = htons(port);
-#endif
     std::thread(&ScreenStreamer::listenForBroadcast, this).detach();
 }
 
