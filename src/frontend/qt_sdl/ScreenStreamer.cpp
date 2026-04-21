@@ -3,6 +3,7 @@
 #include <cstring>
 #include <algorithm>
 #include <thread>
+#include <unistd.h>
 
 #pragma pack(push, 1)
 struct PacketHeader {
