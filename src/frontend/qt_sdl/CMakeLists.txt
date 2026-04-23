@@ -281,3 +281,18 @@ if (ENABLE_OGLRENDERER)
     target_compile_definitions(melonDS PUBLIC MELONDS_GL_HEADER=${MELONDS_GL_HEADER})
     target_compile_definitions(core PUBLIC MELONDS_GL_HEADER=${MELONDS_GL_HEADER})
 endif()
+
+if (TARGET PkgConfig::SDL2)
+    # ensure pkg-config imported targets exist
+
+    find_package(PkgConfig REQUIRED)
+
+    pkg_check_modules(GST REQUIRED IMPORTED_TARGET
+        gstreamer-1.0
+        gstreamer-app-1.0
+        gstreamer-webrtc-1.0
+        gstreamer-sdp-1.0
+    )
+endif()
+
+target_link_libraries(melonDS PRIVATE PkgConfig::GST)

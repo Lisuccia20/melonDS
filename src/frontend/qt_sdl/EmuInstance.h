@@ -84,6 +84,11 @@ int getEventKeyVal(QKeyEvent* event);
 class EmuInstance
 {
 public:
+
+    void setTouch(bool touching, uint16_t x, uint16_t y);
+
+    void setButton(int id, bool pressed);
+    void setAxis(int id, int8_t value);
     EmuInstance(int inst);
     ~EmuInstance();
 
@@ -168,6 +173,12 @@ public:
     int micReadInput(melonDS::s16* data, int maxlength);
 
     QMutex renderLock;
+
+    void remoteTouchDown(int x, int y);
+    void remoteTouchMove(int x, int y);
+    void remoteTouchUp();
+
+    void remoteButtonState(int key, bool pressed);
 
 private:
     static int lastSep(const std::string& path);

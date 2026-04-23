@@ -110,3 +110,14 @@ add_subdirectory(src)
 if (BUILD_QT_SDL)
     add_subdirectory(src/frontend/qt_sdl)
 endif()
+
+set(ENV{PKG_CONFIG_PATH} "/opt/homebrew/lib/pkgconfig")
+
+find_package(PkgConfig REQUIRED)
+
+pkg_check_modules(GST REQUIRED
+    gstreamer-1.0
+    gstreamer-app-1.0
+    gstreamer-webrtc-1.0
+    gstreamer-sdp-1.0
+)

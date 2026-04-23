@@ -2195,6 +2195,15 @@ QString EmuInstance::gbaCartLabel()
     return "(none)";
 }
 
+void EmuInstance::setTouch(bool touching, uint16_t x, uint16_t y) {
+    isTouching = touching;
+
+    if (touching) {
+        touchX = x;
+        touchY = y;
+    }
+}
+
 
 void EmuInstance::romIcon(const u8 (&data)[512], const u16 (&palette)[16], u32 (&iconRef)[32*32])
 {

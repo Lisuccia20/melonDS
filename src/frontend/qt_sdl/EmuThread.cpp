@@ -109,7 +109,7 @@ void EmuThread::run()
     u32 mainScreenPos[3];
 
 
-    ScreenStreamer streamer(5001);
+    ScreenStreamer streamer(5001, emuInstance);
 
     //emuInstance->updateConsole();
     // No carts are inserted when melonDS first boots
@@ -256,6 +256,15 @@ void EmuThread::run()
 
             // process input and hotkeys
             emuInstance->nds->SetKeyMask(emuInstance->inputMask);
+            
+            if (streamer.touchActive) {
+                int x = std::clamp((int)streamer.touchX, 0, 255);
+                int y = std::clamp((int)streamer.touchY, 0, 191);
+
+                emuInstance->nds->TouchScreen(x, y);
+            } else {
+                emuInstance->nds->ReleaseScreen();
+            }
 
             if (emuInstance->isTouching)
                 emuInstance->nds->TouchScreen(emuInstance->touchX, emuInstance->touchY);
@@ -314,15 +323,57 @@ void EmuThread::run()
                 nlines = emuInstance->nds->RunFrame();
             }
 
-            {
-                void* top    = nullptr;
+           {
+                void* top = nullptr;
                 void* bottom = nullptr;
-                // GetFramebuffers ritorna false se il renderer è OpenGL
-                // (i framebuffer stanno sulla GPU, non in RAM)
-                if (emuInstance->nds->GPU.GetRenderer().GetFramebuffers(&top, &bottom))
+
+                bool hasFB = emuInstance->nds->GPU.GetRenderer().GetFramebuffers(&top, &bottom);
+
+                if (hasFB && bottom)
                 {
-                    if (bottom)
-                        streamer.sendFrame(bottom, 256, 192);
+                    // Path framebuffer software (se disponibile)
+                    streamer.sendFrame(bottom, 256, 192);
+                }
+                else
+                {
+                    // Fallback OpenGL SEMPRE valido
+
+                    static uint32_t gl_pixels[256 * 192];
+                    static uint32_t gl_flipped[256 * 192];
+
+                    // Assicura che il contesto GL sia corrente
+                    emuInstance->makeCurrentGL();
+
+                    // IMPORTANTISSIMO: garantisce che il frame sia pronto
+                    glFinish();
+
+                    // Leggi framebuffer
+                    glReadPixels(
+                        0, 0,
+                        256, 192,
+                        GL_RGBA,
+                        GL_UNSIGNED_BYTE,
+                        gl_pixels
+                    );
+
+                    // Flip verticale + conversione RGBA → BGRA in un solo passaggio
+                    for (int y = 0; y < 192; y++)
+                    {
+                        uint32_t* src = gl_pixels + (191 - y) * 256;
+                        uint32_t* dst = gl_flipped + y * 256;
+
+                        for (int x = 0; x < 256; x++)
+                        {
+                            uint32_t p = src[x];
+
+                            dst[x] =
+                                (p & 0xFF00FF00) |
+                                ((p & 0x00FF0000) >> 16) |
+                                ((p & 0x000000FF) << 16);
+                        }
+                    }
+
+                    streamer.sendFrame(gl_flipped, 256, 192);
                 }
             }
 

@@ -458,12 +458,67 @@ void EmuInstance::inputProcess()
 
 void EmuInstance::touchScreen(int x, int y)
 {
+    SDL_LockMutex(joyMutex.get());
     touchX = x;
     touchY = y;
     isTouching = true;
+    SDL_UnlockMutex(joyMutex.get());
 }
 
 void EmuInstance::releaseScreen()
 {
+    SDL_LockMutex(joyMutex.get());
     isTouching = false;
+    SDL_UnlockMutex(joyMutex.get());
+}
+
+void EmuInstance::remoteTouchDown(int x, int y)
+{
+    SDL_LockMutex(joyMutex.get());
+    touchX = x;
+    touchY = y;
+    isTouching = true;
+    SDL_UnlockMutex(joyMutex.get());
+}
+
+void EmuInstance::remoteTouchMove(int x, int y)
+{
+    SDL_LockMutex(joyMutex.get());
+    touchX = x;
+    touchY = y;
+    isTouching = true;
+    SDL_UnlockMutex(joyMutex.get());
+}
+
+void EmuInstance::remoteTouchUp()
+{
+    SDL_LockMutex(joyMutex.get());
+    isTouching = false;
+    SDL_UnlockMutex(joyMutex.get());
+}
+
+void EmuInstance::remoteButtonState(int key, bool pressed)
+{
+    SDL_LockMutex(joyMutex.get());
+
+    switch (key)
+    {
+        case 0:  if (pressed) keyInputMask &= ~(1 << 0); else keyInputMask |= (1 << 0); break; // A
+        case 1:  if (pressed) keyInputMask &= ~(1 << 1); else keyInputMask |= (1 << 1); break; // B
+        case 2:  if (pressed) keyInputMask &= ~(1 << 2); else keyInputMask |= (1 << 2); break; // Select
+        case 3:  if (pressed) keyInputMask &= ~(1 << 3); else keyInputMask |= (1 << 3); break; // Start
+        case 4:  if (pressed) keyInputMask &= ~(1 << 4); else keyInputMask |= (1 << 4); break; // Right
+        case 5:  if (pressed) keyInputMask &= ~(1 << 5); else keyInputMask |= (1 << 5); break; // Left
+        case 6:  if (pressed) keyInputMask &= ~(1 << 6); else keyInputMask |= (1 << 6); break; // Up
+        case 7:  if (pressed) keyInputMask &= ~(1 << 7); else keyInputMask |= (1 << 7); break; // Down
+        case 8:  if (pressed) keyInputMask &= ~(1 << 8); else keyInputMask |= (1 << 8); break; // R
+        case 9:  if (pressed) keyInputMask &= ~(1 << 9); else keyInputMask |= (1 << 9); break; // L
+        case 10: if (pressed) keyInputMask &= ~(1 << 10); else keyInputMask |= (1 << 10); break; // X
+        case 11: if (pressed) keyInputMask &= ~(1 << 11); else keyInputMask |= (1 << 11); break; // Y
+        default: break;
+    }
+
+    inputMask = keyInputMask & joyInputMask;
+
+    SDL_UnlockMutex(joyMutex.get());
 }
