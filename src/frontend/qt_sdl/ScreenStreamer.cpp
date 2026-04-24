@@ -3,6 +3,7 @@
 
 #include <gst/gst.h>
 #include <gst/app/gstappsrc.h>
+#define GST_USE_UNSTABLE_API
 #include <gst/webrtc/webrtc.h>
 #include <gst/sdp/sdp.h>
 
@@ -10,11 +11,29 @@
 #include <iostream>
 #include <vector>
 #include <cstring>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <dns_sd.h>
+
+#ifdef _WIN32
+  #include <winsock2.h>
+  #include <ws2tcpip.h>
+  #pragma comment(lib, "ws2_32.lib")
+  #define close(s)   closesocket(s)
+  #define socklen_t  int
+  // mDNS stub
+  typedef void* DNSServiceRef;
+  #define kDNSServiceInterfaceIndexAny 0
+  static DNSServiceRef serviceRef = nullptr;
+  static inline void DNSServiceRegister(DNSServiceRef*, int, int,
+      const char*, const char*, void*, void*,
+      uint16_t, int, const void*, void*, void*) {}
+  static inline void DNSServiceRefDeallocate(DNSServiceRef) {}
+#else
+  #include <sys/socket.h>
+  #include <netinet/in.h>
+  #include <arpa/inet.h>
+  #include <unistd.h>
+  #include <dns_sd.h>
+  static DNSServiceRef serviceRef = nullptr;
+#endif
 
 /* ---------------- PACKETS ---------------- */
 
@@ -43,15 +62,18 @@ static GstElement* appsrc    = nullptr;
 static GstElement* webrtcbin = nullptr;
 static GMainLoop*  gst_loop  = nullptr;
 
-static DNSServiceRef serviceRef = nullptr;
-
 /* ---------------- IP ---------------- */
 
 static std::string getLocalIP() {
     char buf[INET_ADDRSTRLEN] = "0.0.0.0";
 
+#ifdef _WIN32
+    SOCKET s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s == INVALID_SOCKET) return buf;
+#else
     int s = socket(AF_INET, SOCK_DGRAM, 0);
     if (s < 0) return buf;
+#endif
 
     sockaddr_in dst{};
     dst.sin_family = AF_INET;
@@ -76,6 +98,7 @@ static void startMDNS(uint16_t port) {
     std::string ip = getLocalIP();
     std::string txt = "ip=" + ip;
 
+#ifndef _WIN32
     std::vector<uint8_t> record(txt.size() + 1);
     record[0] = (uint8_t)txt.size();
     memcpy(record.data() + 1, txt.data(), txt.size());
@@ -94,6 +117,7 @@ static void startMDNS(uint16_t port) {
         nullptr,
         nullptr
     );
+#endif
 
     std::cout << "[mDNS] " << ip << ":" << port << "\n";
 }
@@ -121,7 +145,7 @@ static void on_ice_candidate(GstElement*, guint mline, gchar* candidate, gpointe
 
     std::string msg = "ICE|" + std::to_string(mline) + "|0|" + candidate;
 
-    sendto(self->sock, msg.data(), msg.size(), 0,
+    sendto(self->sock, msg.data(), (int)msg.size(), 0,
            (sockaddr*)&self->clientAddr, self->clientLen);
 }
 
@@ -150,7 +174,7 @@ static void on_answer_created(GstPromise* promise, gpointer ud) {
         memcpy(buf.data(), "RBWB", 4);
         memcpy(buf.data() + 4, sdp, strlen(sdp));
 
-        sendto(self->sock, buf.data(), buf.size(), 0,
+        sendto(self->sock, (const char*)buf.data(), (int)buf.size(), 0,
                (sockaddr*)&self->clientAddr, self->clientLen);
 
         g_free(sdp);
@@ -204,9 +228,6 @@ void ScreenStreamer::initGStreamer(uint16_t port)
         g_main_loop_run(gst_loop);
     }).detach();
 
-    // ─────────────────────────────
-    // ELEMENTI
-    // ─────────────────────────────
     pipeline  = gst_pipeline_new("streamer");
 
     appsrc     = gst_element_factory_make("appsrc", "appsrc");
@@ -228,9 +249,6 @@ void ScreenStreamer::initGStreamer(uint16_t port)
         return;
     }
 
-    // ─────────────────────────────
-    // CAPS (RAW FRAME)
-    // ─────────────────────────────
     GstCaps* caps = gst_caps_new_simple(
         "video/x-raw",
         "format", G_TYPE_STRING, "BGRA",
@@ -248,12 +266,9 @@ void ScreenStreamer::initGStreamer(uint16_t port)
 
     gst_caps_unref(caps);
 
-    // ─────────────────────────────
-    // X264 LOW LATENCY FIX
-    // ─────────────────────────────
     g_object_set(enc,
-        "tune", 0x00000004,     // zerolatency
-        "speed-preset", 1,      // ultrafast
+        "tune", 0x00000004,
+        "speed-preset", 1,
         "bitrate", 1500,
         "key-int-max", 30,
         "bframes", 0,
@@ -262,37 +277,24 @@ void ScreenStreamer::initGStreamer(uint16_t port)
         "byte-stream", TRUE,
         nullptr);
 
-    // ─────────────────────────────
-    // RTP PAYLOAD
-    // ─────────────────────────────
     g_object_set(pay,
         "config-interval", 1,
         "pt", 96,
         nullptr);
 
-    // ─────────────────────────────
-    // WEBRTC CONFIG
-    // ─────────────────────────────
     g_object_set(webrtcbin,
         "stun-server", "stun:stun.l.google.com:19302",
         "latency", 50,
         nullptr);
 
-    // ─────────────────────────────
-    // BUILD PIPELINE (CORRETTO ORDER)
-    // ─────────────────────────────
     gst_bin_add_many(GST_BIN(pipeline),
         appsrc, conv, enc, pay, webrtcbin, nullptr);
 
-    // RAW → CONVERT → ENCODE → RTP
     if (!gst_element_link_many(appsrc, conv, enc, pay, nullptr))
     {
         std::cerr << "[GST] ERROR linking video pipeline\n";
     }
 
-    // ─────────────────────────────
-    // RTP → WEBRTC (CORRECT PAD LINK)
-    // ─────────────────────────────
     GstPad* srcpad = gst_element_get_static_pad(pay, "src");
     GstPad* sinkpad = gst_element_request_pad_simple(webrtcbin, "sink_%u");
 
@@ -304,32 +306,25 @@ void ScreenStreamer::initGStreamer(uint16_t port)
     gst_object_unref(srcpad);
     gst_object_unref(sinkpad);
 
-    // ─────────────────────────────
-    // ICE CALLBACK
-    // ─────────────────────────────
     g_signal_connect(webrtcbin, "on-ice-candidate",
         G_CALLBACK(on_ice_candidate), this);
 
-    // ─────────────────────────────
-    // START
-    // ─────────────────────────────
     gst_element_set_state(pipeline, GST_STATE_PLAYING);
 
     std::cout << "[GST] Pipeline started OK\n";
 }
+
 /* ---------------- TOUCH ---------------- */
 
 void ScreenStreamer::handleTouch(uint8_t type, uint16_t x, uint16_t y) {
     if (!emuInstance) return;
 
     if (type == 2) {
-        // up — accetta solo se è passato almeno 50ms dal down
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - lastTouchDown).count();
         if (elapsed < 50)
         {
-            // schedula il rilascio con un piccolo delay
             std::thread([this]() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 emuInstance->remoteTouchUp();
@@ -362,8 +357,6 @@ void ScreenStreamer::handleButton(uint8_t type, uint8_t id, int8_t value)
 
     bool pressed = (value != 0);
 
-    // GPButton: a=0,b=1,x=2,y=3,lb=4,rb=5,lt=6,rt=7,back=8,start=9,ls=10,rs=11,dpadUp=12,dpadDown=13,dpadLeft=14,dpadRight=15
-    // remoteButtonState: A=0,B=1,Select=2,Start=3,Right=4,Left=5,Up=6,Down=7,R=8,L=9,X=10,Y=11
     static const int toMelonDS[] = {
          0,  // a      → A
          1,  // b      → B
@@ -371,8 +364,8 @@ void ScreenStreamer::handleButton(uint8_t type, uint8_t id, int8_t value)
         11,  // y      → Y
          9,  // lb     → L
          8,  // rb     → R
-        -1,  // lt     → n/a (trigger analogico)
-        -1,  // rt     → n/a (trigger analogico)
+        -1,  // lt     → n/a
+        -1,  // rt     → n/a
          2,  // back   → Select
          3,  // start  → Start
         -1,  // ls     → n/a
@@ -394,7 +387,6 @@ void ScreenStreamer::sendFrame(const void* data, int w, int h)
     if (!appsrc || !data) return;
 
     static GstClockTime baseTime = gst_util_get_timestamp();
-    static uint64_t frameId = 0;
 
     int size = w * h * 4;
 
@@ -417,6 +409,7 @@ void ScreenStreamer::sendFrame(const void* data, int w, int h)
     }
 }
 
+/* ---------------- CONSTRUCTOR ---------------- */
 
 ScreenStreamer::ScreenStreamer(uint16_t port, EmuInstance* emu)
     : emuInstance(emu),
@@ -432,10 +425,13 @@ ScreenStreamer::ScreenStreamer(uint16_t port, EmuInstance* emu)
 {
     memset(&clientAddr, 0, sizeof(clientAddr));
 
-    // ─────────────────────────────
-    // SIGNALING SOCKET (SDP + ICE + BUTTONS)
-    // ─────────────────────────────
-    sock = socket(AF_INET, SOCK_DGRAM, 0);
+#ifdef _WIN32
+    WSADATA wsaData;
+    WSAStartup(MAKEWORD(2, 2), &wsaData);
+#endif
+
+    // SIGNALING SOCKET
+    sock = (int)socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0)
         std::cerr << "[ERR] signalling socket() failed\n";
 
@@ -444,13 +440,11 @@ ScreenStreamer::ScreenStreamer(uint16_t port, EmuInstance* emu)
     local.sin_port        = htons(port);
     local.sin_addr.s_addr = INADDR_ANY;
 
-    if (bind(sock, (sockaddr*)&local, sizeof(local)) < 0)
+    if (bind((SOCKET)sock, (sockaddr*)&local, sizeof(local)) < 0)
         std::cerr << "[ERR] bind signalling failed\n";
 
-    // ─────────────────────────────
-    // TOUCH SOCKET (SEPARATO)
-    // ─────────────────────────────
-    touchSock = socket(AF_INET, SOCK_DGRAM, 0);
+    // TOUCH SOCKET
+    touchSock = (int)socket(AF_INET, SOCK_DGRAM, 0);
     if (touchSock < 0)
         std::cerr << "[ERR] touch socket() failed\n";
 
@@ -459,13 +453,11 @@ ScreenStreamer::ScreenStreamer(uint16_t port, EmuInstance* emu)
     touchLocal.sin_port        = htons(5002);
     touchLocal.sin_addr.s_addr = INADDR_ANY;
 
-    if (bind(touchSock, (sockaddr*)&touchLocal, sizeof(touchLocal)) < 0)
+    if (bind((SOCKET)touchSock, (sockaddr*)&touchLocal, sizeof(touchLocal)) < 0)
         std::cerr << "[ERR] bind touch failed\n";
 
-    // ─────────────────────────────
-    // INPUT SOCKET (BUTTONS + AXES)
-    // ─────────────────────────────
-    inputSock = socket(AF_INET, SOCK_DGRAM, 0);
+    // INPUT SOCKET
+    inputSock = (int)socket(AF_INET, SOCK_DGRAM, 0);
     if (inputSock < 0)
         std::cerr << "[ERR] input socket() failed\n";
 
@@ -474,42 +466,33 @@ ScreenStreamer::ScreenStreamer(uint16_t port, EmuInstance* emu)
     inputLocal.sin_port        = htons(5003);
     inputLocal.sin_addr.s_addr = INADDR_ANY;
 
-    if (bind(inputSock, (sockaddr*)&inputLocal, sizeof(inputLocal)) < 0)
+    if (bind((SOCKET)inputSock, (sockaddr*)&inputLocal, sizeof(inputLocal)) < 0)
     {
-        std::cerr << "[ERR] bind input failed: "
-                  << strerror(errno) << std::endl;
+        std::cerr << "[ERR] bind input failed\n";
     }
 
-    // ─────────────────────────────
     // mDNS
-    // ─────────────────────────────
     startMDNS(port);
 
-    // ─────────────────────────────
     // GSTREAMER
-    // ─────────────────────────────
     initGStreamer(port);
 
-    // ─────────────────────────────
     // THREAD: SDP + ICE
-    // ─────────────────────────────
     std::thread([this] {
         char buf[65536];
 
         while (running)
         {
-            int n = recvfrom(sock, buf, sizeof(buf), 0,
+            int n = recvfrom((SOCKET)sock, buf, sizeof(buf), 0,
                              (sockaddr*)&clientAddr, &clientLen);
             if (n <= 0) continue;
 
-            // SDP OFFER
             if (n > 4 && memcmp(buf, "WBRT", 4) == 0)
             {
                 handleOffer(std::string(buf + 4, n - 4));
                 continue;
             }
 
-            // ICE
             if (n > 4 && memcmp(buf, "ICE|", 4) == 0)
             {
                 std::string msg(buf, n);
@@ -533,15 +516,13 @@ ScreenStreamer::ScreenStreamer(uint16_t port, EmuInstance* emu)
         }
     }).detach();
 
-    // ─────────────────────────────
     // THREAD: TOUCH INPUT
-    // ─────────────────────────────
     std::thread([this] {
         uint8_t buf[sizeof(TouchPacket)];
 
         while (running)
         {
-            int n = recv(touchSock, buf, sizeof(buf), 0);
+            int n = recv((SOCKET)touchSock, (char*)buf, sizeof(buf), 0);
 
             if (n < (int)sizeof(TouchPacket))
                 continue;
@@ -553,9 +534,7 @@ ScreenStreamer::ScreenStreamer(uint16_t port, EmuInstance* emu)
         }
     }).detach();
 
-    // ─────────────────────────────
     // THREAD: BUTTON + AXIS INPUT
-    // ─────────────────────────────
     std::thread([this] {
         uint8_t buf[256];
 
@@ -563,11 +542,11 @@ ScreenStreamer::ScreenStreamer(uint16_t port, EmuInstance* emu)
 
         while (running)
         {
-            int n = recv(inputSock, buf, sizeof(buf), 0);
+            int n = recv((SOCKET)inputSock, (char*)buf, sizeof(buf), 0);
 
             if (n < 0)
             {
-                std::cerr << "[INPUT] recv error: " << strerror(errno) << std::endl;
+                std::cerr << "[INPUT] recv error\n";
                 break;
             }
 
@@ -596,8 +575,9 @@ ScreenStreamer::ScreenStreamer(uint16_t port, EmuInstance* emu)
 ScreenStreamer::~ScreenStreamer() {
     running = false;
 
-    if (sock >= 0) close(sock);
-    if (touchSock >= 0) close(touchSock);
+    if (sock >= 0)      closesocket((SOCKET)sock);
+    if (touchSock >= 0) closesocket((SOCKET)touchSock);
+    if (inputSock >= 0) closesocket((SOCKET)inputSock);
 
     if (pipeline) {
         gst_element_set_state(pipeline, GST_STATE_NULL);
@@ -609,7 +589,13 @@ ScreenStreamer::~ScreenStreamer() {
         g_main_loop_unref(gst_loop);
     }
 
+#ifndef _WIN32
     if (serviceRef) {
         DNSServiceRefDeallocate(serviceRef);
     }
+#endif
+
+#ifdef _WIN32
+    WSACleanup();
+#endif
 }
