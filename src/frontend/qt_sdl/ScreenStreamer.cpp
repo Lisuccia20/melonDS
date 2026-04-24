@@ -7,6 +7,7 @@
 #include <gst/webrtc/webrtc.h>
 #include <gst/sdp/sdp.h>
 
+#include <atomic>
 #include <thread>
 #include <iostream>
 #include <vector>
@@ -16,25 +17,14 @@
   #include <winsock2.h>
   #include <ws2tcpip.h>
   #pragma comment(lib, "ws2_32.lib")
-  #define close(s)   closesocket(s)
-  #define socklen_t  int
-  // mDNS stub
-  typedef void* DNSServiceRef;
-  #define kDNSServiceInterfaceIndexAny 0
-  static DNSServiceRef serviceRef = nullptr;
-  static inline void DNSServiceRegister(DNSServiceRef*, int, int,
-      const char*, const char*, void*, void*,
-      uint16_t, int, const void*, void*, void*) {}
-  static inline void DNSServiceRefDeallocate(DNSServiceRef) {}
+  #define close(s)  closesocket(s)
+  #define socklen_t int
 #else
   #include <sys/socket.h>
   #include <netinet/in.h>
   #include <arpa/inet.h>
   #include <unistd.h>
-  #include <dns_sd.h>
-  static DNSServiceRef serviceRef = nullptr;
 #endif
-
 /* ---------------- PACKETS ---------------- */
 
 #pragma pack(push, 1)
