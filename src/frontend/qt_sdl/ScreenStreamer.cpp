@@ -97,17 +97,13 @@ static void startDiscovery(uint16_t sigPort) {
     discoveryRunning = true;
 
     std::thread([sigPort] {
-#ifdef _WIN32
-        SOCKET s = socket(AF_INET, SOCK_DGRAM, 0);
-#else
-        int s = socket(AF_INET, SOCK_DGRAM, 0);
-#endif
+        socket_t s = socket(AF_INET, SOCK_DGRAM, 0);
         if (s < 0) { std::cerr << "[Discovery] socket failed\n"; return; }
 
         int yes = 1;
         setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (char*)&yes, sizeof(yes));
 #ifdef SO_REUSEPORT
-        setsockopt(s, SOL_SOCKET, SO_REUSEPORT, &yes, sizeof(yes));
+        setsockopt(s, SOL_SOCKET, SO_REUSEPORT, (char*)&yes, sizeof(yes));
 #endif
 
         sockaddr_in local{};
@@ -117,7 +113,7 @@ static void startDiscovery(uint16_t sigPort) {
 
         if (bind(s, (sockaddr*)&local, sizeof(local)) < 0) {
             std::cerr << "[Discovery] bind failed\n";
-            close(s); return;
+            closesocket(s); return;
         }
 
         std::cout << "[Discovery] listening on :5000\n";
@@ -127,13 +123,12 @@ static void startDiscovery(uint16_t sigPort) {
         socklen_t clientLen = sizeof(client);
 
         while (discoveryRunning) {
-            // timeout ogni secondo per poter uscire
 #ifdef _WIN32
             DWORD tv = 1000;
             setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&tv, sizeof(tv));
 #else
             timeval tv{1, 0};
-            setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&tv, sizeof(tv));
 #endif
             int n = recvfrom(s, buf, sizeof(buf) - 1, 0,
                              (sockaddr*)&client, &clientLen);
@@ -141,8 +136,6 @@ static void startDiscovery(uint16_t sigPort) {
 
             buf[n] = '\0';
             std::string msg(buf, n);
-
-            // trim whitespace/newline
             msg.erase(msg.find_last_not_of(" \r\n\t") + 1);
 
             if (msg == "WBRT_DISCOVER") {
@@ -154,7 +147,7 @@ static void startDiscovery(uint16_t sigPort) {
             }
         }
 
-        close(s);
+        closesocket(s);
     }).detach();
 }
 
