@@ -480,7 +480,7 @@ ScreenStreamer::ScreenStreamer(uint16_t port, EmuInstance* emu)
     local.sin_port        = htons(port);
     local.sin_addr.s_addr = INADDR_ANY;
 
-    if (bind((SOCKET)sock, (sockaddr*)&local, sizeof(local)) < 0)
+    if (bind((socket_t)sock, (sockaddr*)&local, sizeof(local)) < 0)
         std::cerr << "[ERR] bind signalling failed\n";
 
     // TOUCH SOCKET
@@ -493,7 +493,7 @@ ScreenStreamer::ScreenStreamer(uint16_t port, EmuInstance* emu)
     touchLocal.sin_port        = htons(5002);
     touchLocal.sin_addr.s_addr = INADDR_ANY;
 
-    if (bind((SOCKET)touchSock, (sockaddr*)&touchLocal, sizeof(touchLocal)) < 0)
+    if (bind((socket_t)touchSock, (sockaddr*)&touchLocal, sizeof(touchLocal)) < 0)
         std::cerr << "[ERR] bind touch failed\n";
 
     // INPUT SOCKET
@@ -506,7 +506,7 @@ ScreenStreamer::ScreenStreamer(uint16_t port, EmuInstance* emu)
     inputLocal.sin_port        = htons(5003);
     inputLocal.sin_addr.s_addr = INADDR_ANY;
 
-    if (bind((SOCKET)inputSock, (sockaddr*)&inputLocal, sizeof(inputLocal)) < 0)
+    if (bind((socket_t)inputSock, (sockaddr*)&inputLocal, sizeof(inputLocal)) < 0)
     {
         std::cerr << "[ERR] bind input failed\n";
     }
@@ -523,7 +523,7 @@ ScreenStreamer::ScreenStreamer(uint16_t port, EmuInstance* emu)
 
         while (running)
         {
-            int n = recvfrom((SOCKET)sock, buf, sizeof(buf), 0,
+            int n = recvfrom((socket_t)sock, buf, sizeof(buf), 0,
                              (sockaddr*)&clientAddr, &clientLen);
             if (n <= 0) continue;
 
@@ -562,7 +562,7 @@ ScreenStreamer::ScreenStreamer(uint16_t port, EmuInstance* emu)
 
         while (running)
         {
-            int n = recv((SOCKET)touchSock, (char*)buf, sizeof(buf), 0);
+            int n = recv((socket_t)touchSock, (char*)buf, sizeof(buf), 0);
 
             if (n < (int)sizeof(TouchPacket))
                 continue;
@@ -582,7 +582,7 @@ ScreenStreamer::ScreenStreamer(uint16_t port, EmuInstance* emu)
 
         while (running)
         {
-            int n = recv((SOCKET)inputSock, (char*)buf, sizeof(buf), 0);
+            int n = recv((socket_t)inputSock, (char*)buf, sizeof(buf), 0);
 
             if (n < 0)
             {
@@ -615,9 +615,9 @@ ScreenStreamer::ScreenStreamer(uint16_t port, EmuInstance* emu)
 ScreenStreamer::~ScreenStreamer() {
     running = false;
 
-    if (sock >= 0)      closesocket((SOCKET)sock);
-    if (touchSock >= 0) closesocket((SOCKET)touchSock);
-    if (inputSock >= 0) closesocket((SOCKET)inputSock);
+    if (sock >= 0)      closesocket((socket_t)sock);
+    if (touchSock >= 0) closesocket((socket_t)touchSock);
+    if (inputSock >= 0) closesocket((socket_t)inputSock);
 
     if (pipeline) {
         gst_element_set_state(pipeline, GST_STATE_NULL);
