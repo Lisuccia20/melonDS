@@ -5,8 +5,15 @@
 #include <atomic>
 #include <stdint.h>
 #include <chrono>
-#include <netinet/in.h>
-#include <sys/socket.h>
+
+#ifdef _WIN32
+  #include <winsock2.h>
+  #include <ws2tcpip.h>
+  typedef int socklen_t;
+#else
+  #include <netinet/in.h>
+  #include <sys/socket.h>
+#endif
 
 class EmuInstance;
 
@@ -47,8 +54,8 @@ private:
     void startButtonListening();  // gamepad UDP
 
     /* ---------------- INPUT HANDLING ---------------- */
-    void handleTouchPacket(const uint8_t* data, ssize_t n);
-    void handleButtonPacket(const uint8_t* data, ssize_t n);
+    void handleTouchPacket(const uint8_t* data, int n);
+    void handleButtonPacket(const uint8_t* data, int n);
 
     /* ---------------- INJECTION (melonDS) ---------------- */
     void injectTouchDown(uint16_t x, uint16_t y);
