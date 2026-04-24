@@ -94,32 +94,82 @@ static std::string getLocalIP() {
 
 /* ---------------- mDNS ---------------- */
 
-static void startMDNS(uint16_t port) {
-    std::string ip = getLocalIP();
-    std::string txt = "ip=" + ip;
+// Rimuovi:
+//   #include <dns_sd.h>
+//   static DNSServiceRef serviceRef = nullptr;
+//   e la funzione startMDNS()
 
-#ifndef _WIN32
-    std::vector<uint8_t> record(txt.size() + 1);
-    record[0] = (uint8_t)txt.size();
-    memcpy(record.data() + 1, txt.data(), txt.size());
+/* ---------------- UDP BROADCAST DISCOVERY ---------------- */
 
-    DNSServiceRegister(
-        &serviceRef,
-        0,
-        kDNSServiceInterfaceIndexAny,
-        "ScreenStreamer",
-        "_stream._udp",
-        nullptr,
-        nullptr,
-        htons(port),
-        record.size(),
-        record.data(),
-        nullptr,
-        nullptr
-    );
+static std::atomic<bool> discoveryRunning{false};
+
+static void startDiscovery(uint16_t sigPort) {
+    discoveryRunning = true;
+
+    std::thread([sigPort] {
+#ifdef _WIN32
+        SOCKET s = socket(AF_INET, SOCK_DGRAM, 0);
+#else
+        int s = socket(AF_INET, SOCK_DGRAM, 0);
+#endif
+        if (s < 0) { std::cerr << "[Discovery] socket failed\n"; return; }
+
+        int yes = 1;
+        setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (char*)&yes, sizeof(yes));
+#ifdef SO_REUSEPORT
+        setsockopt(s, SOL_SOCKET, SO_REUSEPORT, &yes, sizeof(yes));
 #endif
 
-    std::cout << "[mDNS] " << ip << ":" << port << "\n";
+        sockaddr_in local{};
+        local.sin_family      = AF_INET;
+        local.sin_port        = htons(5000);
+        local.sin_addr.s_addr = INADDR_ANY;
+
+        if (bind(s, (sockaddr*)&local, sizeof(local)) < 0) {
+            std::cerr << "[Discovery] bind failed\n";
+            close(s); return;
+        }
+
+        std::cout << "[Discovery] listening on :5000\n";
+
+        char buf[64];
+        sockaddr_in client{};
+        socklen_t clientLen = sizeof(client);
+
+        while (discoveryRunning) {
+            // timeout ogni secondo per poter uscire
+#ifdef _WIN32
+            DWORD tv = 1000;
+            setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&tv, sizeof(tv));
+#else
+            timeval tv{1, 0};
+            setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
+            int n = recvfrom(s, buf, sizeof(buf) - 1, 0,
+                             (sockaddr*)&client, &clientLen);
+            if (n <= 0) continue;
+
+            buf[n] = '\0';
+            std::string msg(buf, n);
+
+            // trim whitespace/newline
+            msg.erase(msg.find_last_not_of(" \r\n\t") + 1);
+
+            if (msg == "WBRT_DISCOVER") {
+                std::cout << "[Discovery] probe from "
+                          << inet_ntoa(client.sin_addr) << "\n";
+                const char* reply = "WBRT_HERE";
+                sendto(s, reply, (int)strlen(reply), 0,
+                       (sockaddr*)&client, clientLen);
+            }
+        }
+
+        close(s);
+    }).detach();
+}
+
+static void stopDiscovery() {
+    discoveryRunning = false;
 }
 
 /* ---------------- ICE ---------------- */
@@ -472,7 +522,7 @@ ScreenStreamer::ScreenStreamer(uint16_t port, EmuInstance* emu)
     }
 
     // mDNS
-    startMDNS(port);
+    startDiscovery(port);
 
     // GSTREAMER
     initGStreamer(port);
@@ -589,11 +639,7 @@ ScreenStreamer::~ScreenStreamer() {
         g_main_loop_unref(gst_loop);
     }
 
-#ifndef _WIN32
-    if (serviceRef) {
-        DNSServiceRefDeallocate(serviceRef);
-    }
-#endif
+    stopDiscovery();
 
 #ifdef _WIN32
     WSACleanup();
