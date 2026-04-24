@@ -101,50 +101,28 @@ static void startDiscovery(uint16_t sigPort) {
         if (s < 0) { std::cerr << "[Discovery] socket failed\n"; return; }
 
         int yes = 1;
+        setsockopt(s, SOL_SOCKET, SO_BROADCAST, (char*)&yes, sizeof(yes));
         setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (char*)&yes, sizeof(yes));
-#ifdef SO_REUSEPORT
-        setsockopt(s, SOL_SOCKET, SO_REUSEPORT, (char*)&yes, sizeof(yes));
-#endif
 
         sockaddr_in local{};
         local.sin_family      = AF_INET;
         local.sin_port        = htons(5000);
         local.sin_addr.s_addr = INADDR_ANY;
 
-        if (bind(s, (sockaddr*)&local, sizeof(local)) < 0) {
-            std::cerr << "[Discovery] bind failed\n";
-            closesocket(s); return;
-        }
+        bind(s, (sockaddr*)&local, sizeof(local));
 
-        std::cout << "[Discovery] listening on :5000\n";
+        sockaddr_in bcast{};
+        bcast.sin_family      = AF_INET;
+        bcast.sin_port        = htons(5000);
+        inet_pton(AF_INET, "255.255.255.255", &bcast.sin_addr);
 
-        char buf[64];
-        sockaddr_in client{};
-        socklen_t clientLen = sizeof(client);
+        std::cout << "[Discovery] broadcasting on :5000\n";
 
         while (discoveryRunning) {
-#ifdef _WIN32
-            DWORD tv = 1000;
-            setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&tv, sizeof(tv));
-#else
-            timeval tv{1, 0};
-            setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&tv, sizeof(tv));
-#endif
-            int n = recvfrom(s, buf, sizeof(buf) - 1, 0,
-                             (sockaddr*)&client, &clientLen);
-            if (n <= 0) continue;
-
-            buf[n] = '\0';
-            std::string msg(buf, n);
-            msg.erase(msg.find_last_not_of(" \r\n\t") + 1);
-
-            if (msg == "WBRT_DISCOVER") {
-                std::cout << "[Discovery] probe from "
-                          << inet_ntoa(client.sin_addr) << "\n";
-                const char* reply = "WBRT_HERE";
-                sendto(s, reply, (int)strlen(reply), 0,
-                       (sockaddr*)&client, clientLen);
-            }
+            const char* msg = "WBRT_HERE";
+            sendto(s, msg, (int)strlen(msg), 0,
+                   (sockaddr*)&bcast, sizeof(bcast));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
 
         closesocket(s);
